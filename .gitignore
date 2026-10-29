@@ -3,6 +3,9 @@ dist/
 build/
 *.spec
 
+# --- 运行时生成的配置（窗口位置/上次布局）---
+overlay.json
+
 # --- Python ---
 __pycache__/
 *.py[cod]

@@ -14,6 +14,7 @@ echo [2/2] Building ...
     --name KeyOverlay ^
     --icon app.ico ^
     --add-data "keyboard-mouse.svg;." ^
+    --add-data "keyboard-mouse-extended.svg;." ^
     --add-data "app.ico;." ^
     --exclude-module tkinter --exclude-module numpy --exclude-module matplotlib ^
     keyoverlay.py
