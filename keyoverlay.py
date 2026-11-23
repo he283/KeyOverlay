@@ -16,7 +16,7 @@ transform 矩阵），再用 Pillow 逐元素栅格化。因此形状、圆角�
     python keyoverlay.py --preview out.png [--pressed W,LMB]
     python keyoverlay.py --toggle-vk 0x78 --quit-vk 0x79
 
-运行中：F9 隐藏/显示，F10 退出；控制面板可切换经典/扩展布局。
+运行中：F9 隐藏/显示，F10 退出；控制面板可切换经典/扩展/五列布局。
 """
 import argparse
 import ctypes
@@ -54,12 +54,17 @@ def _resource(name):
 SVG_FILES = {
     "classic": "keyboard-mouse.svg",
     "extended": "keyboard-mouse-extended.svg",
+    "wide": "keyboard-mouse-wide.svg",
 }
-LAYOUT_NAMES = {"classic": "经典布局", "extended": "扩展布局"}
+LAYOUT_NAMES = {"classic": "经典布局", "extended": "扩展布局", "wide": "五列布局"}
 CURRENT_LAYOUT = "classic"
 SCALE_MIN, SCALE_MAX, SCALE_STEP = 0.7, 2.4, 0.1
 CURRENT_SCALE = 1.2
+
+# 当前生效的热键（虚拟键码，0 = 禁用）。可在控制面板里改，存 overlay.json。
+_HK = {"toggle": 0x78, "quit": 0x79, "move": 0x77}
 SVG_FILE = _resource(SVG_FILES[CURRENT_LAYOUT])
+SVG_W, SVG_H = 1280, 736          # 当前设计稿的画布尺寸，load_svg 会更新
 
 # ============================ 外观参数 ============================
 SS = 4                     # 超采样倍数
@@ -77,10 +82,10 @@ SHADOW_MARGIN = 6
 
 # 元素 id / 字形 aria-label -> 虚拟键码
 KEYMAP = {
-    "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34,
-    "TAB": 0x09, "Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52,
-    "SHIFT": 0xA0, "A": 0x41, "S": 0x53, "D": 0x44, "F": 0x46,
-    "ALT": 0xA4, "Z": 0x5A, "X": 0x58, "C": 0x43, "V": 0x56,
+    "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, "5": 0x35,
+    "TAB": 0x09, "Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52, "T": 0x54,
+    "SHIFT": 0xA0, "A": 0x41, "S": 0x53, "D": 0x44, "F": 0x46, "G": 0x47,
+    "ALT": 0xA4, "Z": 0x5A, "X": 0x58, "C": 0x43, "V": 0x56, "B": 0x42,
     "CTRL": 0xA2, "SPACE": 0x20,
 }
 MOUSE_BTNS = [("LMB", 0x01), ("RMB", 0x02), ("MMB", 0x04), ("X1", 0x05), ("X2", 0x06)]
@@ -102,10 +107,10 @@ def _rebuild_active_vks():
     ACTIVE_VKS = out
 
 PRESS_BY_ID = {
-    "key-1": "1", "key-2": "2", "key-3": "3", "key-4": "4",
-    "key-tab": "TAB", "key-q": "Q", "key-w": "W", "key-e": "E", "key-r": "R",
-    "key-shift": "SHIFT", "key-a": "A", "key-s": "S", "key-d": "D", "key-f": "F",
-    "key-alt": "ALT", "key-z": "Z", "key-x": "X", "key-c": "C", "key-v": "V",
+    "key-1": "1", "key-2": "2", "key-3": "3", "key-4": "4", "key-5": "5",
+    "key-tab": "TAB", "key-q": "Q", "key-w": "W", "key-e": "E", "key-r": "R", "key-t": "T",
+    "key-shift": "SHIFT", "key-a": "A", "key-s": "S", "key-d": "D", "key-f": "F", "key-g": "G",
+    "key-alt": "ALT", "key-z": "Z", "key-x": "X", "key-c": "C", "key-v": "V", "key-b": "B",
     "key-ctrl": "CTRL", "key-space": "SPACE",
     "mouse-left": "LMB", "mouse-right": "RMB", "mouse-wheel": "MMB",
     "mouse-side-front": "X1", "mouse-side-back": "X2",
@@ -253,7 +258,13 @@ def _color(txt, default=None):
 
 def load_svg(path):
     """解析成元素列表，每个元素带：子路径、填充、描边、线宽、包围盒、按下映射。"""
+    global SVG_W, SVG_H
     root = ET.parse(path).getroot()
+    try:
+        SVG_W = float(root.attrib.get("width") or SVG_W)
+        SVG_H = float(root.attrib.get("height") or SVG_H)
+    except (TypeError, ValueError):
+        pass
     out = []
 
     def walk(node, attrs, mat):
@@ -407,7 +418,7 @@ def render(pressed=(), scale=1.0, bg=False, mouse_yellow=False):
     k = scale * SS
     pressed = key[0]
     if bg and _BODY is not None:
-        box = (0, 0, 1280, 736)
+        box = (0, 0, SVG_W, SVG_H)
     else:
         box = (BX0, BY0, BX1, BY1)
 
@@ -811,6 +822,21 @@ def is_down(vk):
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
 
+# 修饰键：按住任意一个时，单键热键不触发。
+# 起因是 issue #1：NVIDIA 录屏用 Alt+F9，我们只认 F9，一录屏就把浮层隐藏了。
+MOD_VKS = (0x11, 0xA2, 0xA3,      # Ctrl
+           0x10, 0xA0, 0xA1,      # Shift
+           0x12, 0xA4, 0xA5,      # Alt
+           0x5B, 0x5C)            # Win
+
+
+def hotkey_pressed(vk):
+    """只有"光按这一个键"才算，组合键（Alt+F9 之类）不触发。vk 为 0 表示已禁用。"""
+    if not vk or not is_down(vk):
+        return False
+    return not any(is_down(m) for m in MOD_VKS)
+
+
 # ============================ 滚轮方向（Raw Input） ============================
 # 滚轮没有"按住"这种状态，GetAsyncKeyState 读不到；低层鼠标钩子又会给整机输入加延迟。
 # Raw Input 是"旁路复制"：系统把鼠标事件复制一份给我们，不拦截、不影响其它程序。
@@ -941,8 +967,20 @@ NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x01, 0x02, 0x04
 MF_STRING, MF_SEPARATOR, MF_CHECKED = 0x0000, 0x0800, 0x0008
 TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_NONOTIFY = 0x0100, 0x0002, 0x0080
 ID_TOGGLE, ID_RELOAD, ID_QUIT, ID_PANEL = 1001, 1002, 1003, 1004
-ID_CLASSIC, ID_EXTENDED = 1005, 1006
+ID_CLASSIC, ID_EXTENDED, ID_WIDE = 1005, 1006, 1013
 ID_SCALE_DOWN, ID_SCALE_UP, ID_SCALE_RESET, ID_MOVE = 1007, 1008, 1009, 1010
+ID_HK_TOGGLE, ID_HK_QUIT = 1011, 1012
+CBS_DROPDOWNLIST = 0x0003
+WS_VSCROLL = 0x00200000
+CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL = 0x0143, 0x014E, 0x0147
+CBN_SELCHANGE = 1
+# 可选热键（0 = 禁用）。F8 留给"移动浮窗"，不放进来避免打架。
+HOTKEY_CHOICES = [
+    ("禁用", 0), ("F6", 0x75), ("F7", 0x76), ("F9", 0x78), ("F10", 0x79),
+    ("F11", 0x7A), ("F12", 0x7B), ("ScrollLock", 0x91), ("Pause", 0x13),
+    ("Insert", 0x2D), ("Home", 0x24), ("End", 0x23), ("PageUp", 0x21),
+    ("PageDown", 0x22), ("`", 0xC0), ("[", 0xDB), ("]", 0xDD),
+]
 
 CMD = {"toggle": False, "reload": False, "quit": False, "layout": None,
        "panel": False, "scale": None, "move": False}
@@ -1060,6 +1098,8 @@ def show_tray_menu(hwnd):
                        ID_CLASSIC, "经典布局")
     user32.AppendMenuW(menu, MF_STRING | (MF_CHECKED if CURRENT_LAYOUT == "extended" else 0),
                        ID_EXTENDED, "扩展布局")
+    user32.AppendMenuW(menu, MF_STRING | (MF_CHECKED if CURRENT_LAYOUT == "wide" else 0),
+                       ID_WIDE, "五列布局")
     user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
     user32.AppendMenuW(menu, MF_STRING, ID_RELOAD, "重新加载当前设计稿 (svg)")
     user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
@@ -1079,6 +1119,8 @@ def show_tray_menu(hwnd):
         CMD["layout"] = "classic"
     elif cmd == ID_EXTENDED:
         CMD["layout"] = "extended"
+    elif cmd == ID_WIDE:
+        CMD["layout"] = "wide"
     elif cmd == ID_RELOAD:
         CMD["reload"] = True
     elif cmd == ID_QUIT:
@@ -1102,6 +1144,8 @@ def _tray_wndproc(hwnd, msg, wparam, lparam):
             CMD["layout"] = "classic"
         elif rid == ID_EXTENDED:
             CMD["layout"] = "extended"
+        elif rid == ID_WIDE:
+            CMD["layout"] = "wide"
         elif rid == ID_RELOAD:
             CMD["reload"] = True
         elif rid == ID_QUIT:
@@ -1130,7 +1174,7 @@ def create_tray_window():
 
 # ============================ 原生控制面板 ============================
 PANEL_CLASS = "KeyMouseOverlayPanel"
-PANEL_CLASSIC_DESC, PANEL_EXTENDED_DESC = 2001, 2002
+PANEL_CLASSIC_DESC, PANEL_EXTENDED_DESC, PANEL_WIDE_DESC = 2001, 2002, 2004
 PANEL_STATUS = 2003
 WM_SETFONT = 0x0030
 BM_SETCHECK = 0x00F1
@@ -1142,8 +1186,9 @@ BS_AUTORADIOBUTTON = 0x00000009
 BS_GROUPBOX = 0x00000007
 BS_PUSHBUTTON = 0x00000000
 _PANEL = {"hwnd": None, "visible": False, "font": None, "title_font": None,
-          "classic": None, "extended": None, "status": None, "toggle": None,
-          "scale_label": None, "move": None}
+          "classic": None, "extended": None, "wide": None, "status": None,
+          "toggle": None, "scale_label": None, "move": None,
+          "hk_toggle": None, "hk_quit": None}
 _panel_proc_ref = []
 
 user32.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint,
@@ -1155,10 +1200,32 @@ gdi32.CreateFontW.restype = wintypes.HFONT
 def _panel_wndproc(hwnd, msg, wparam, lparam):
     if msg == WM_COMMAND:
         rid = wparam & 0xFFFF
+        code = (wparam >> 16) & 0xFFFF
+        if rid in (ID_HK_TOGGLE, ID_HK_QUIT):
+            if code == CBN_SELCHANGE:
+                which = "toggle" if rid == ID_HK_TOGGLE else "quit"
+                ctrl = _PANEL["hk_toggle" if which == "toggle" else "hk_quit"]
+                idx = int(user32.SendMessageW(ctrl, CB_GETCURSEL, 0, 0))
+                if 0 <= idx < len(HOTKEY_CHOICES):
+                    vk = HOTKEY_CHOICES[idx][1]
+                    other = "quit" if which == "toggle" else "toggle"
+                    if vk and vk == _HK[other]:
+                        panel_update()          # 把下拉框退回原值
+                        user32.SetWindowTextW(
+                            _PANEL["status"],
+                            "显示/隐藏与退出程序不能使用同一个按键")
+                        user32.MessageBeep(0)
+                        return 0
+                    _HK[which] = vk
+                    save_config(hotkeys=dict(_HK))
+                    panel_update()
+            return 0
         if rid == ID_CLASSIC:
             CMD["layout"] = "classic"
         elif rid == ID_EXTENDED:
             CMD["layout"] = "extended"
+        elif rid == ID_WIDE:
+            CMD["layout"] = "wide"
         elif rid == ID_TOGGLE:
             CMD["toggle"] = True
         elif rid == ID_SCALE_DOWN:
@@ -1187,6 +1254,8 @@ def panel_update():
                         1 if CURRENT_LAYOUT == "classic" else 0, 0)
     user32.SendMessageW(_PANEL["extended"], BM_SETCHECK,
                         1 if CURRENT_LAYOUT == "extended" else 0, 0)
+    user32.SendMessageW(_PANEL["wide"], BM_SETCHECK,
+                        1 if CURRENT_LAYOUT == "wide" else 0, 0)
     user32.SetWindowTextW(_PANEL["status"],
                           "当前：%s  ·  浮层%s" % (LAYOUT_NAMES[CURRENT_LAYOUT],
                                                "显示中" if _TRAY["visible"] else "已隐藏"))
@@ -1196,6 +1265,11 @@ def panel_update():
     if _PANEL["move"]:
         user32.SetWindowTextW(_PANEL["move"],
                               "完成移动 (F8)" if _MOVE["on"] else "移动浮窗 (F8)")
+    for key, ctl in (("toggle", "hk_toggle"), ("quit", "hk_quit")):
+        h = _PANEL.get(ctl)
+        if h:
+            idx = next((i for i, (_l, vk) in enumerate(HOTKEY_CHOICES) if vk == _HK[key]), 0)
+            user32.SendMessageW(h, CB_SETCURSEL, idx, 0)
 
 
 def panel_show():
@@ -1224,7 +1298,7 @@ def create_panel(show=True):
     sw = user32.GetSystemMetrics(0)
     hwnd = user32.CreateWindowExW(0, PANEL_CLASS, "KeyOverlay 控制面板",
                                   WS_OVERLAPPEDWINDOW, max(20, sw - 470), 60,
-                                  430, 466, None, None, hinst, None)
+                                  430, 628, None, None, hinst, None)
     if not hwnd:
         return None
     _PANEL["hwnd"] = hwnd
@@ -1242,30 +1316,55 @@ def create_panel(show=True):
             user32.SendMessageW(child, WM_SETFONT, chosen, 1)
         return child
 
+    def combo(choices, x, y, w, cur_vk, cid=None):
+        child = user32.CreateWindowExW(
+            0, "COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+            x, y, w, 200, hwnd, cid, hinst, None)
+        for label, _vk in choices:
+            # SendMessageW 的 argtypes 是整数，字符串要塞成指针地址
+            buf = ctypes.c_wchar_p(label)
+            user32.SendMessageW(child, CB_ADDSTRING, 0,
+                                ctypes.cast(buf, ctypes.c_void_p).value)
+        idx = next((i for i, (_l, vk) in enumerate(choices) if vk == cur_vk), 0)
+        user32.SendMessageW(child, CB_SETCURSEL, idx, 0)
+        if font:
+            user32.SendMessageW(child, WM_SETFONT, font, 1)
+        return child
+
     control("STATIC", "KeyOverlay 控制面板", 24, 18, 360, 34, title=True)
     control("STATIC", "切换显示方案；按 F8 可拖动浮窗位置", 24, 56, 370, 24)
-    control("BUTTON", "按键显示布局", 20, 90, 370, 139, style=BS_GROUPBOX)
-    _PANEL["classic"] = control("BUTTON", "经典布局", 42, 120, 180, 25,
+    control("BUTTON", "按键显示布局", 20, 84, 370, 196, style=BS_GROUPBOX)
+    _PANEL["classic"] = control("BUTTON", "经典布局", 42, 112, 180, 25,
                                 ID_CLASSIC, BS_AUTORADIOBUTTON | WS_GROUP)
-    control("STATIC", "Q W E / A S D / Ctrl / 空格", 61, 148, 290, 22,
+    control("STATIC", "Q W E / A S D / Ctrl / 空格", 61, 138, 290, 22,
             PANEL_CLASSIC_DESC)
-    _PANEL["extended"] = control("BUTTON", "扩展布局", 42, 177, 180, 25,
+    _PANEL["extended"] = control("BUTTON", "扩展布局", 42, 165, 180, 25,
                                  ID_EXTENDED, BS_AUTORADIOBUTTON)
-    control("STATIC", "1–4 / Tab / Q–R / A–F / Z–V / Alt", 61, 205, 310, 22,
+    control("STATIC", "1–4 / Tab / Q–R / A–F / Z–V / Alt", 61, 191, 310, 22,
             PANEL_EXTENDED_DESC)
-    _PANEL["status"] = control("STATIC", "", 24, 236, 370, 24, PANEL_STATUS)
+    _PANEL["wide"] = control("BUTTON", "五列布局", 42, 218, 180, 25,
+                             ID_WIDE, BS_AUTORADIOBUTTON)
+    control("STATIC", "1–5 / Tab / Q–T / A–G / Z–B / Alt", 61, 244, 310, 22,
+            PANEL_WIDE_DESC)
+    _PANEL["status"] = control("STATIC", "", 24, 288, 370, 24, PANEL_STATUS)
 
-    control("STATIC", "缩放", 24, 270, 60, 24)
-    control("BUTTON", "\u2212", 88, 266, 46, 32, ID_SCALE_DOWN, BS_PUSHBUTTON)
-    _PANEL["scale_label"] = control("STATIC", "120%", 138, 270, 90, 24, PANEL_STATUS + 10)
-    control("BUTTON", "+", 232, 266, 46, 32, ID_SCALE_UP, BS_PUSHBUTTON)
-    control("BUTTON", "重置", 286, 266, 98, 32, ID_SCALE_RESET, BS_PUSHBUTTON)
+    control("BUTTON", "快捷键", 20, 318, 370, 116, style=BS_GROUPBOX)
+    control("STATIC", "显示/隐藏", 36, 344, 100, 22)
+    _PANEL["hk_toggle"] = combo(HOTKEY_CHOICES, 150, 340, 150, _HK["toggle"], ID_HK_TOGGLE)
+    control("STATIC", "退出程序", 36, 382, 100, 22)
+    _PANEL["hk_quit"] = combo(HOTKEY_CHOICES, 150, 378, 150, _HK["quit"], ID_HK_QUIT)
 
-    _PANEL["move"] = control("BUTTON", "移动浮窗 (F8)", 24, 312, 170, 36,
+    control("STATIC", "缩放", 24, 452, 60, 24)
+    control("BUTTON", "\u2212", 88, 448, 46, 32, ID_SCALE_DOWN, BS_PUSHBUTTON)
+    _PANEL["scale_label"] = control("STATIC", "120%", 138, 452, 90, 24, PANEL_STATUS + 10)
+    control("BUTTON", "+", 232, 448, 46, 32, ID_SCALE_UP, BS_PUSHBUTTON)
+    control("BUTTON", "重置", 286, 448, 98, 32, ID_SCALE_RESET, BS_PUSHBUTTON)
+
+    _PANEL["move"] = control("BUTTON", "移动浮窗 (F8)", 24, 494, 170, 36,
                              ID_MOVE, BS_PUSHBUTTON)
-    _PANEL["toggle"] = control("BUTTON", "隐藏浮层", 216, 312, 170, 36,
+    _PANEL["toggle"] = control("BUTTON", "隐藏浮层", 216, 494, 170, 36,
                                ID_TOGGLE, BS_PUSHBUTTON)
-    control("BUTTON", "退出程序", 24, 360, 362, 36, ID_QUIT, BS_PUSHBUTTON)
+    control("BUTTON", "退出程序", 24, 540, 362, 36, ID_QUIT, BS_PUSHBUTTON)
     _TRAY["visible"] = True
     if show:
         panel_show()
@@ -1288,7 +1387,7 @@ def reload_art():
 
 
 def set_layout(name):
-    """切换设计稿并清空缓存；name 为 classic 或 extended。"""
+    """切换设计稿并清空缓存；name 为 classic、extended 或 wide。"""
     global CURRENT_LAYOUT, SVG_FILE
     if name not in SVG_FILES:
         raise ValueError("未知布局: %s" % name)
@@ -1305,12 +1404,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pos", default=None, help="左上角坐标 x,y（默认左下角）")
     ap.add_argument("--margin", type=int, default=40)
-    ap.add_argument("--move-vk", default="0x77",
+    ap.add_argument("--move-vk", default=None,
                     help="移动浮窗的按键（默认 0x77 = F8）：按一下进入移动模式，拖完再按一次")
     ap.add_argument("--scale", type=float, default=None,
                     help="初始缩放倍率（不给就用上次的，默认 1.2）")
     ap.add_argument("--layout", choices=tuple(SVG_FILES), default=None,
-                    help="初始按键布局：classic 经典，extended 扩展（不给就用上次的）")
+                    help="初始按键布局：classic 经典，extended 扩展，wide 五列（不给就用上次的）")
     ap.add_argument("--no-wheel", action="store_true",
                     help="不监听滚轮方向（省一点 CPU，上滚/下滚就不亮了）")
     ap.add_argument("--panel", dest="panel", action="store_true", default=None,
@@ -1328,10 +1427,30 @@ def main():
     ap.add_argument("--debug", action="store_true", help="把状态变化写进 keyoverlay.log，排查连点用")
     ap.add_argument("--poll", type=float, default=0.006,
                     help="轮询间隔（秒），默认 0.006")
-    ap.add_argument("--toggle-vk", default="0x78", help="隐藏/显示热键的虚拟键码（默认 0x78 = F9）")
-    ap.add_argument("--quit-vk", default="0x79,0x7A",
-                    help="退出热键的虚拟键码，可写多个（默认 0x79,0x7A = F10 或 F11；0x7A 其实是 F11）")
+    ap.add_argument("--toggle-vk", default=None,
+                    help="显示/隐藏热键的虚拟键码（默认 0x78 = F9；写 0 或 none 表示禁用）")
+    ap.add_argument("--quit-vk", default=None,
+                    help="退出热键（默认 0x79 = F10；写 0 或 none 表示禁用）")
     args = ap.parse_args()
+    def _vk(text, default):
+        """把 "0x78" / "0" / "none" / "off" 解析成虚拟键码。"""
+        if text is None:
+            return default
+        t = str(text).strip().lower()
+        if t in ("", "0", "none", "off", "disable"):
+            return 0
+        return int(t, 0)
+
+    saved_hk = load_config().get("hotkeys") or {}
+    _HK["toggle"] = _vk(args.toggle_vk, int(saved_hk.get("toggle", 0x78)))
+    _HK["quit"] = _vk(args.quit_vk, int(saved_hk.get("quit", 0x79)))
+    _HK["move"] = _vk(args.move_vk, int(saved_hk.get("move", 0x77)))
+    if _HK["toggle"] and _HK["toggle"] == _HK["quit"]:
+        if args.toggle_vk is not None or args.quit_vk is not None:
+            ap.error("--toggle-vk 和 --quit-vk 不能使用同一个按键")
+        _HK["quit"] = 0                     # 旧配置冲突：先禁用退出热键
+        save_config(hotkeys=dict(_HK))
+        print("快捷键冲突：退出热键已禁用，请在控制面板里重新设置。")
     set_layout(args.layout or load_config().get("layout") or "classic")
     CURRENT_SCALE = args.scale or float(load_config().get("scale") or 1.2)
     CURRENT_SCALE = max(SCALE_MIN, min(SCALE_MAX, round(CURRENT_SCALE, 2)))
@@ -1395,6 +1514,26 @@ def main():
         save_config(pos=[r.left, r.top])
 
     _MOVE["save"] = _save_pos
+
+    def _place_keeping_bottom(img):
+        """换布局/换缩放时保持窗口左下角不动；超出屏幕时贴边。"""
+        nonlocal x, y, w, h
+        r = RECT()
+        if user32.GetWindowRect(hwnd, ctypes.byref(r)):
+            left, bottom = r.left, r.bottom
+        else:
+            left, bottom = x, y + h
+        w, h = img.size
+        # 用虚拟屏幕范围，避免把副屏上的浮窗夹回主屏
+        vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+        vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+        if vw <= 0 or vh <= 0:
+            vx, vy, vw, vh = 0, 0, sw, sh
+        x = max(vx, min(left, vx + vw - w))
+        y = max(vy, min(bottom - h, vy + vh - h))
+        user32.SetWindowPos(hwnd, None, x, y, w, h,
+                            SWP_NOZORDER | SWP_NOACTIVATE)
+
     paint(hwnd, img)
 
     # 托盘图标：单击显示/隐藏，右键出菜单
@@ -1419,10 +1558,7 @@ def main():
     POLL = max(0.002, args.poll)
     dbg = args.debug
     dbg_f = open(os.path.join(HERE, "keyoverlay.log"), "w", encoding="utf-8") if dbg else None
-    toggle_vk = int(args.toggle_vk, 0)
-    move_vk = int(args.move_vk, 0)
     prev_move = False
-    quit_vks = [int(v, 0) for v in str(args.quit_vk).split(",") if v.strip()]
     prev_f9 = prev_f10 = False
     visible = True
     print("已启动：%dx%d @ (%d,%d)   F9 隐藏/显示，F10 退出" % (w, h, x, y))
@@ -1476,16 +1612,10 @@ def main():
                     set_layout(requested_layout)
                     img = render(pressed=prev_state, scale=CURRENT_SCALE,
                                  bg=args.bg, mouse_yellow=args.mouse_yellow)
-                    w, h = img.size
-                    if not args.pos:
-                        x, y = args.margin, sh - h - args.margin
-                        if SHADOW:
-                            x -= SHADOW_MARGIN
-                            y -= SHADOW_MARGIN
-                    user32.SetWindowPos(hwnd, None, x, y, w, h,
-                                        SWP_NOZORDER | SWP_NOACTIVATE)
+                    _place_keeping_bottom(img)
                     paint(hwnd, img)
                     save_config(layout=CURRENT_LAYOUT)
+                    _save_pos()
                     panel_update()
                     print("布局：%s" % LAYOUT_NAMES[CURRENT_LAYOUT])
                 except Exception:
@@ -1507,18 +1637,15 @@ def main():
                         new_scale = round(CURRENT_SCALE - SCALE_STEP, 2)
                     new_scale = max(SCALE_MIN, min(SCALE_MAX, new_scale))
                     if new_scale != CURRENT_SCALE:
-                        old_h = h
                         CURRENT_SCALE = new_scale
                         _TILES.clear()          # 旧倍率的贴片全扔掉，别越攒越多
                         _FRAMES.clear()
                         img = render(pressed=prev_state, scale=CURRENT_SCALE,
                                      bg=args.bg, mouse_yellow=args.mouse_yellow)
-                        w, h = img.size
-                        x, y = x, y + old_h - h      # 以左下角为锚点
-                        user32.SetWindowPos(hwnd, None, x, y, w, h,
-                                            SWP_NOZORDER | SWP_NOACTIVATE)
+                        _place_keeping_bottom(img)
                         paint(hwnd, img)
                         save_config(scale=CURRENT_SCALE)
+                        _save_pos()
                         panel_update()
                         print("缩放：%d%%" % round(CURRENT_SCALE * 100))
                 except Exception:
@@ -1536,16 +1663,15 @@ def main():
                 img = render(pressed=prev_state, scale=CURRENT_SCALE,
                              bg=args.bg, mouse_yellow=args.mouse_yellow)
                 if img.size != (w, h):
-                    w, h = img.size
-                    user32.SetWindowPos(hwnd, None, x, y, w, h,
-                                        SWP_NOZORDER | SWP_NOACTIVATE)
+                    _place_keeping_bottom(img)
+                    _save_pos()
                 paint(hwnd, img)
                 panel_update()
 
             toggle_req = CMD["toggle"]
             CMD["toggle"] = False
-            f9 = is_down(toggle_vk)
-            f10 = any(is_down(v) for v in quit_vks)
+            f9 = hotkey_pressed(_HK["toggle"])
+            f10 = hotkey_pressed(_HK["quit"])
             if (f9 and not prev_f9) or toggle_req:
                 visible = not visible
                 _TRAY["visible"] = visible
@@ -1559,7 +1685,7 @@ def main():
             if f10 and not prev_f10:
                 print("退出")
                 break
-            mv = is_down(move_vk)
+            mv = hotkey_pressed(_HK["move"])
             if mv and not prev_move:
                 set_move_mode(not _MOVE["on"], img)
             prev_move = mv

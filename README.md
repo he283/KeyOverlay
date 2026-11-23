@@ -6,10 +6,11 @@
 程序直接解析 SVG 路径（含贝塞尔曲线、圆角、字形路径、transform 矩阵）再栅格化，
 不是照着图猜坐标。**不需要 OBS，也不需要 NohBoard**。
 
-内置两套可随时切换的布局：
+内置三套可随时切换的布局：
 
 - **经典布局**：保留原来的 Q W E、Shift A S D、Ctrl、空格和鼠标。
 - **扩展布局**：增加 1–4、Tab、R、F、Alt、Z X C V，保留经典布局已有的全部按键。
+- **五列布局**：在扩展布局基础上再加一列，增加 5、T、G、B，键位覆盖 Q–T / A–G / Z–B。
 
 扩展布局实际效果（W 键与鼠标左键按下）：
 
@@ -45,7 +46,7 @@
 | `key-space`       | 空格      | `mouse-left/right`      | 左/右键     |
 | `mouse-wheel`     | 中键      | `mouse-side-front/back` | 侧键 X1/X2 |
 
-扩展布局另使用 `key-1` ~ `key-4`、`key-tab`、`key-r`、`key-f`、`key-alt`、`key-z` ~ `key-v`，对应数字键、Tab、R、F、Alt 和 Z X C V。左右 Shift、Ctrl、Alt 都能点亮同一个修饰键图标。
+扩展布局另使用 `key-1` ~ `key-4`、`key-tab`、`key-r`、`key-f`、`key-alt`、`key-z` ~ `key-v`，对应数字键、Tab、R、F、Alt 和 Z X C V。五列布局再增加 `key-5`、`key-t`、`key-g`、`key-b`，对应数字 5、T、G、B。左右 Shift、Ctrl、Alt 都能点亮同一个修饰键图标。
 
 字母标签按 `aria-label` 关联到对应按键，按下时键帽变黄、字母保持白色。
 
@@ -58,7 +59,7 @@
 | 参数                                    | 说明                               |
 | ------------------------------------- | -------------------------------- |
 | `--scale 1.2`                         | 整体缩放（经典布局 1.0 时约 420×186）      |
-| `--layout classic` / `--layout extended` | 指定启动布局：经典 / 扩展                 |
+| `--layout classic` / `extended` / `wide` | 指定启动布局：经典 / 扩展 / 五列            |
 | `--no-panel`                          | 启动时不打开控制面板                       |
 | `--bg`                                | 连 SVG 的黑色底板一起画（就是设计稿那张图）         |
 | `--mouse-yellow`                      | 鼠标左右键**常亮**黄色（不要按下反馈时用，更接近设计稿）   |
@@ -70,15 +71,33 @@
 | `--poll 0.006`                        | 轮询间隔（默认 6ms）                     |
 | `--debug`                             | 把每次状态变化写进 `keyoverlay.log`，排查连点用 |
 | `--no-tray`                           | 不创建系统托盘图标                        |
-| `--toggle-vk 0x78` / `--quit-vk 0x7A` | 隐藏/退出热键的虚拟键码                     |
+| `--toggle-vk 0x78` / `--quit-vk 0x7A` | 显示/隐藏、退出热键的虚拟键码（写 `0` 或 `none` 表示禁用） |
 | `--move-vk 0x77`                      | 移动浮窗的按键（默认 F8）                     |
 
 运行中：**F9 显示/隐藏，F10 退出，F8 拖动位置**，缩放和布局在**控制面板**里点一下就行。
 
+### 快捷键冲突怎么办
+
+**默认只认"光按一个键"**：按住 Alt / Ctrl / Shift / Win 时，热键不触发。
+所以 NVIDIA 录屏用的 `Alt+F9` **不会**再把浮层隐藏（这是 issue #1 的修复）。
+
+如果还想彻底改掉或关掉：
+
+- **控制面板 → 快捷键**：两个下拉框分别设「显示/隐藏」和「退出程序」，
+  可选 F6 / F7 / F9 / F10 / F11 / F12 / ScrollLock / Pause / Insert / Home / End / PageUp / PageDown / ` / [ / ]，
+  选「**禁用**」就完全不响应。改完立即生效，并存进 `overlay.json`。
+- **命令行**：`--toggle-vk 0x77`（改成 F8）、`--toggle-vk 0`（禁用）。
+  命令行优先级高于面板设置。
+
+> 「显示/隐藏」和「退出程序」不能设成同一个键（都选「禁用」除外）。
+> 面板里选到冲突键会自动退回并提示；命令行传入相同键会直接报错，旧配置里的冲突会自动禁用退出热键。
+>
+> F8 留给「移动浮窗」，不在可选列表里，避免两个功能抢同一个键。
+
 ### 缩放大小
 
 控制面板里有一行「缩放」：`−` / `＋` 每次 10%，中间显示当前倍率（如 120%），`重置` 回到 100%。
-范围限制在 70%～240%，**以左下角为锚点**缩放，所以贴着屏幕左下角放时不会跑位。
+范围限制在 70%～240%，**以左下角为锚点**缩放；即使已经拖动过浮窗，缩放后也不会跳回默认位置。
 
 倍率会存进 `overlay.json`，下次启动沿用；想临时指定用 `--scale 1.5`。
 
@@ -96,6 +115,7 @@
 3. **命令行指定**：`KeyOverlay.exe --pos 100,200`（左上角坐标，优先级高于记忆的位置）。
 
 > `overlay.json` 还会记住上次用的**布局**，所以「拖好位置 + 选好布局」重启后都会保持。
+> 切换布局或缩放时也以**当前左下角**为锚点，拖好的位置不会因为换布局而回到初始位置。
 > 想恢复默认位置，删掉 `overlay.json` 或加 `--pos` 即可。
 
 ### 鼠标滚轮
@@ -116,9 +136,9 @@
 用**脚本**（`start.bat`）启动时会自动打开控制面板；**双击 exe 不会弹面板**（不打扰你），
 右键托盘图标 →「打开控制面板」随时都能叫出来。想强制打开加 `--panel`，想彻底不建加 `--no-panel`。
 
-面板里能做的事：可直接选择「经典布局」或「扩展布局」，也可隐藏/显示浮层、退出程序。关闭面板窗口只会收起面板，不会退出浮层；之后可从托盘右键菜单重新打开。
+面板里能做的事：可直接选择「经典布局」「扩展布局」或「五列布局」，也可隐藏/显示浮层、退出程序。关闭面板窗口只会收起面板，不会退出浮层；之后可从托盘右键菜单重新打开。
 
-托盘右键菜单也提供两种布局的直接切换。切换会立即重绘，不需要重启，原来的 `keyboard-mouse.svg` 不会被修改。
+托盘右键菜单也提供三种布局的直接切换。切换会立即重绘，不需要重启，原来的 `keyboard-mouse.svg` 不会被修改。
 
 > 重复双击 `start.bat` 不会叠出两个浮层：新实例会先让旧实例退出再接管。
 
@@ -136,7 +156,7 @@
 > **Windows 11 会把新图标默认收进 `^` 折叠区**，看不到就点一下 `^`，  
 > 把它**拖到**任务栏上，以后就一直显示了。这是系统行为，程序没法自己把它"钉"出来。
 
-「重新加载当前设计稿」用于修改当前布局的 SVG 后热重载：经典布局对应 `keyboard-mouse.svg`，扩展布局对应 `keyboard-mouse-extended.svg`。
+「重新加载当前设计稿」用于修改当前布局的 SVG 后热重载：经典布局对应 `keyboard-mouse.svg`，扩展布局对应 `keyboard-mouse-extended.svg`，五列布局对应 `keyboard-mouse-wide.svg`。
 
 ### 进游戏后浮层看不见 / 按键不亮？
 
@@ -246,7 +266,7 @@ KeyOverlay.exe --debug
 
 ## 改设计
 
-- **改形状/字**：经典布局改 `keyboard-mouse.svg`，扩展布局改 `keyboard-mouse-extended.svg`（Illustrator / Figma / Inkscape 都行），程序启动时重新解析。
+- **改形状/字**：经典布局改 `keyboard-mouse.svg`，扩展布局改 `keyboard-mouse-extended.svg`，五列布局改 `keyboard-mouse-wide.svg`（Illustrator / Figma / Inkscape 都行），程序启动时重新解析。
 - **改高亮色**：`keyoverlay.py` 顶部 `HILITE`（默认取自 SVG 黄色渐变的中间色 `#e9df68`）。
 - **关掉外发光/投影**：`GLOW = False` / `SHADOW = False`。
 - **改整体大小**：`ART_SCALE`（SVG 单位 → 像素，默认 0.34）或直接用 `--scale`。
@@ -268,6 +288,11 @@ python make_extended_svg.py out.svg --font="C:\Windows\Fonts\arialbi.ttf"
 
 脚本顶部可调：`FONT_PATH`（字体）、`KEY_W/KEY_H/SKEW/RADIUS`（键帽）、`PITCH_X/PITCH_Y`（键距）、
 `LETTER_STROKE_RATIO`（字母描边粗细）、`LETTER_FILL`（`"none"` 空心 / `"#f5f5ef"` 实心）。
+
+### 五列布局的设计稿
+
+`keyboard-mouse-wide.svg` 在扩展布局基础上增加第五列：键帽、鼠标、数字 1–4 以及
+Q W E R / A S D F / Z X C V 等字形全部复用扩展布局，只补了 5、T、G、B 四个字形和第五列键位。
 
 ## 打包成 exe
 
@@ -295,6 +320,7 @@ D:\KeyOverlay
 ├─ keyoverlay.py        主程序（SVG 解析 + Pillow 栅格化 + ctypes 分层窗口）
 ├─ keyboard-mouse.svg   经典布局设计稿
 ├─ keyboard-mouse-extended.svg  扩展布局设计稿（手工绘制，正文）
+├─ keyboard-mouse-wide.svg      五列布局设计稿（复用扩展布局元素）
 ├─ make_extended_svg.py         备选方案生成器（不会覆盖正式稿）
 ├─ dist\KeyOverlay.exe  本地打包产物（不进仓库，发布版见 Releases）
 ├─ build_exe.bat        重新打包
